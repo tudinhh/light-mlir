@@ -4,7 +4,7 @@ func.func @main() {
     %step = arith.constant 3 : index
     
     scf.for %iv = %lb to %ub step %step {
-        // The body can remain empty for this test
+        %sum = arith.constant 5: i32
     }
     return
 }

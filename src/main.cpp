@@ -177,6 +177,17 @@ class Interpreter {
 
     std::cout << "Loop bound:" << lower << " " << upper << " " << step
               << std::endl;
+
+    mlir::Value iv = op.getInductionVar();
+    mlir::Block* bodyBlock = op.getBody();
+
+    for (int64_t i = lower; i < upper; i += step) {
+      stateMap[iv] = RuntimeValue{i};
+      for (mlir::Operation& bodyOp : bodyBlock->getOperations()) {
+        if (llvm::isa<mlir::scf::YieldOp>(bodyOp)) continue;
+        dispatch(&bodyOp);
+      }
+    }
   }
 
   void printValue(const RuntimeValue& val) {
@@ -197,7 +208,6 @@ int main(int argc, char** argv) {
   mlir::MLIRContext context;
   mlir::DialectRegistry registry;
 
-  // Register MemRefDialect alongside Arith and Func
   registry.insert<mlir::arith::ArithDialect, mlir::func::FuncDialect,
                   mlir::memref::MemRefDialect, mlir::scf::SCFDialect>();
   context.appendDialectRegistry(registry);
