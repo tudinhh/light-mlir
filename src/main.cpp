@@ -56,10 +56,18 @@ struct RuntimeValue {
   }
 };
 
+struct StackFrame {
+  llvm::DenseMap<mlir::Value, RuntimeValue> state;
+};
+
 // 3. Interpreter Class
 class Interpreter {
  public:
   void run(mlir::ModuleOp module) {
+
+    struct StackFrame mainFrame;
+    callStack.push_back(mainFrame);
+
     auto mainFunc = module.lookupSymbol<mlir::func::FuncOp>("main");
     if (!mainFunc || mainFunc.getBlocks().empty()) {
       throw std::runtime_error("Error: 'main' function not found or empty.");
@@ -70,7 +78,7 @@ class Interpreter {
 
       if (auto returnOp = llvm::dyn_cast<mlir::func::ReturnOp>(op)) {
         if (returnOp.getNumOperands() > 0) {
-          printValue(stateMap[returnOp.getOperand(0)]);
+          printValue(currentFrame().state[returnOp.getOperand(0)]);
         }
         return;
       }
@@ -80,100 +88,105 @@ class Interpreter {
   }
 
  private:
-  llvm::DenseMap<mlir::Value, RuntimeValue> stateMap;
+   std::vector<StackFrame> callStack;
 
-  bool dispatch(mlir::Operation* op) {
-    if (auto cOp = llvm::dyn_cast<mlir::arith::ConstantOp>(op)) {
-      evalConstant(cOp);
-      return true;
-    }
-    if (auto aOp = llvm::dyn_cast<mlir::arith::AddFOp>(op)) {
-      evalAddF(aOp);
-      return true;
-    }
-    if (auto alOp = llvm::dyn_cast<mlir::memref::AllocOp>(op)) {
-      evalAlloc(alOp);
-      return true;
-    }
-    if (auto dOp = llvm::dyn_cast<mlir::memref::DeallocOp>(op)) {
-      evalDealloc(dOp);
-      return true;
-    }
-    if (auto sOp = llvm::dyn_cast<mlir::memref::StoreOp>(op)) {
-      evalStore(sOp);
-      return true;
-    }
-    if (auto lOp = llvm::dyn_cast<mlir::memref::LoadOp>(op)) {
-      evalLoad(lOp);
-      return true;
-    }
-    if (auto forOp = llvm::dyn_cast<mlir::scf::ForOp>(op)) {
-      evalFor(forOp);
-      return true;
-    }
-    return false;
+   StackFrame &currentFrame() { return callStack.back(); }
+
+   bool dispatch(mlir::Operation *op) {
+     if (auto cOp = llvm::dyn_cast<mlir::arith::ConstantOp>(op)) {
+       evalConstant(cOp);
+       return true;
+     }
+     if (auto aOp = llvm::dyn_cast<mlir::arith::AddFOp>(op)) {
+       evalAddF(aOp);
+       return true;
+     }
+     if (auto alOp = llvm::dyn_cast<mlir::memref::AllocOp>(op)) {
+       evalAlloc(alOp);
+       return true;
+     }
+     if (auto dOp = llvm::dyn_cast<mlir::memref::DeallocOp>(op)) {
+       evalDealloc(dOp);
+       return true;
+     }
+     if (auto sOp = llvm::dyn_cast<mlir::memref::StoreOp>(op)) {
+       evalStore(sOp);
+       return true;
+     }
+     if (auto lOp = llvm::dyn_cast<mlir::memref::LoadOp>(op)) {
+       evalLoad(lOp);
+       return true;
+     }
+     if (auto forOp = llvm::dyn_cast<mlir::scf::ForOp>(op)) {
+       evalFor(forOp);
+       return true;
+     }
+     return false;
   }
 
   void evalConstant(mlir::arith::ConstantOp op) {
     if (auto intAttr = llvm::dyn_cast<mlir::IntegerAttr>(op.getValue())) {
       // Check if it's an 'index' type or standard int
       if (op.getType().isIndex()) {
-        stateMap[op.getResult()] =
-            RuntimeValue{intAttr.getInt()};  // Stores as int64_t
+        currentFrame().state[op.getResult()] =
+            RuntimeValue{intAttr.getInt()}; // Stores as int64_t
       } else {
-        stateMap[op.getResult()] =
+        currentFrame().state[op.getResult()] =
             RuntimeValue{static_cast<int32_t>(intAttr.getInt())};
       }
     } else if (auto floatAttr =
                    llvm::dyn_cast<mlir::FloatAttr>(op.getValue())) {
-      stateMap[op.getResult()] = RuntimeValue{
+      currentFrame().state[op.getResult()] = RuntimeValue{
           static_cast<float>(floatAttr.getValue().convertToFloat())};
     }
   }
 
   void evalAddF(mlir::arith::AddFOp op) {
-    float lhs = stateMap[op.getLhs()].get<float>();
-    float rhs = stateMap[op.getRhs()].get<float>();
-    stateMap[op.getResult()] = RuntimeValue{lhs + rhs};
+    float lhs = currentFrame().state[op.getLhs()].get<float>();
+    float rhs = currentFrame().state[op.getRhs()].get<float>();
+    currentFrame().state[op.getResult()] = RuntimeValue{lhs + rhs};
   }
 
   void evalAlloc(mlir::memref::AllocOp op) {
     auto memRefType = llvm::cast<mlir::MemRefType>(op.getType());
     std::vector<int64_t> shape = memRefType.getShape().vec();
-    stateMap[op.getResult()] = RuntimeValue{std::make_shared<MemRef>(shape)};
+    currentFrame().state[op.getResult()] =
+        RuntimeValue{std::make_shared<MemRef>(shape)};
   }
 
   void evalDealloc(mlir::memref::DeallocOp op) {
-    stateMap.erase(op.getMemref());
+    currentFrame().state.erase(op.getMemref());
   }
 
   std::vector<int64_t> extractIndices(
       mlir::Operation::operand_range indicesOps) {
     std::vector<int64_t> indices;
     for (auto idxVal : indicesOps) {
-      indices.push_back(stateMap[idxVal].get<int64_t>());
+      indices.push_back(currentFrame().state[idxVal].get<int64_t>());
     }
     return indices;
   }
 
   void evalStore(mlir::memref::StoreOp op) {
-    float val = stateMap[op.getValueToStore()].get<float>();
-    auto memref = stateMap[op.getMemref()].get<std::shared_ptr<MemRef>>();
+    float val = currentFrame().state[op.getValueToStore()].get<float>();
+    auto memref =
+        currentFrame().state[op.getMemref()].get<std::shared_ptr<MemRef>>();
     auto indices = extractIndices(op.getIndices());
     memref->data[memref->getFlatIndex(indices)] = val;
   }
 
   void evalLoad(mlir::memref::LoadOp op) {
-    auto memref = stateMap[op.getMemref()].get<std::shared_ptr<MemRef>>();
+    auto memref =
+        currentFrame().state[op.getMemref()].get<std::shared_ptr<MemRef>>();
     auto indices = extractIndices(op.getIndices());
     float val = memref->data[memref->getFlatIndex(indices)];
-    stateMap[op.getResult()] = RuntimeValue{val};
+    currentFrame().state[op.getResult()] = RuntimeValue{val};
   }
 
   void evalFor(mlir::scf::ForOp op) {
-    int64_t lower = stateMap[op.getLowerBound()].get<int64_t>();
-    int64_t upper = stateMap[op.getUpperBound()].get<int64_t>();
-    int64_t step = stateMap[op.getStep()].get<int64_t>();
+    int64_t lower = currentFrame().state[op.getLowerBound()].get<int64_t>();
+    int64_t upper = currentFrame().state[op.getUpperBound()].get<int64_t>();
+    int64_t step = currentFrame().state[op.getStep()].get<int64_t>();
 
     std::cout << "Loop bound:" << lower << " " << upper << " " << step
               << std::endl;
@@ -182,7 +195,7 @@ class Interpreter {
     mlir::Block* bodyBlock = op.getBody();
 
     for (int64_t i = lower; i < upper; i += step) {
-      stateMap[iv] = RuntimeValue{i};
+      currentFrame().state[iv] = RuntimeValue{i};
       for (mlir::Operation& bodyOp : bodyBlock->getOperations()) {
         if (llvm::isa<mlir::scf::YieldOp>(bodyOp)) continue;
         dispatch(&bodyOp);
