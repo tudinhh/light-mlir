@@ -63,34 +63,38 @@ struct StackFrame {
 // 3. Interpreter Class
 class Interpreter {
  public:
-  void run(mlir::ModuleOp module) {
+   void run(mlir::ModuleOp module) {
+     auto mainFunc = module.lookupSymbol<mlir::func::FuncOp>("main");
+     if (!mainFunc || mainFunc.getBlocks().empty()) {
+       throw std::runtime_error("Error: 'main' function not found or empty.");
+     }
 
-    struct StackFrame mainFrame;
-    callStack.push_back(mainFrame);
+     struct StackFrame mainFrame;
+     callStack.push_back(mainFrame);
 
-    auto mainFunc = module.lookupSymbol<mlir::func::FuncOp>("main");
-    if (!mainFunc || mainFunc.getBlocks().empty()) {
-      throw std::runtime_error("Error: 'main' function not found or empty.");
-    }
-
-    for (mlir::Operation& op : mainFunc.getBlocks().front()) {
-      if (dispatch(&op)) continue;
-
-      if (auto returnOp = llvm::dyn_cast<mlir::func::ReturnOp>(op)) {
-        if (returnOp.getNumOperands() > 0) {
-          printValue(currentFrame().state[returnOp.getOperand(0)]);
-        }
-        return;
-      }
-      throw std::runtime_error("Unsupported op: " +
-                               op.getName().getStringRef().str());
-    }
-  }
+     executeBlock(mainFunc.getBlocks().front());
+   }
 
  private:
    std::vector<StackFrame> callStack;
 
    StackFrame &currentFrame() { return callStack.back(); }
+
+   void executeBlock(mlir::Block &block) {
+     for (mlir::Operation &op : block) {
+       if (dispatch(&op))
+         continue;
+
+       if (auto returnOp = llvm::dyn_cast<mlir::func::ReturnOp>(op)) {
+         if (returnOp.getNumOperands() > 0) {
+           printValue(currentFrame().state[returnOp.getOperand(0)]);
+         }
+         return;
+       }
+       throw std::runtime_error("Unsupported op: " +
+                                op.getName().getStringRef().str());
+     }
+   }
 
    bool dispatch(mlir::Operation *op) {
      if (auto cOp = llvm::dyn_cast<mlir::arith::ConstantOp>(op)) {
@@ -122,7 +126,7 @@ class Interpreter {
        return true;
      }
      return false;
-  }
+   }
 
   void evalConstant(mlir::arith::ConstantOp op) {
     if (auto intAttr = llvm::dyn_cast<mlir::IntegerAttr>(op.getValue())) {
