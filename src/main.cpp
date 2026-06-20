@@ -63,77 +63,116 @@ struct StackFrame {
 // 3. Interpreter Class
 class Interpreter {
  public:
-   void run(mlir::ModuleOp module) {
-     auto mainFunc = module.lookupSymbol<mlir::func::FuncOp>("main");
-     if (!mainFunc || mainFunc.getBlocks().empty()) {
-       throw std::runtime_error("Error: 'main' function not found or empty.");
-     }
+  void run(mlir::ModuleOp runModule) {
+    std::cout<<"LOG: --run--"<<std::endl;
+    module = runModule;
+    auto mainFunc = module.lookupSymbol<mlir::func::FuncOp>("main");
+    if (!mainFunc || mainFunc.getBlocks().empty()) {
+      throw std::runtime_error("Error: 'main' function not found or empty.");
+    }
 
-     struct StackFrame mainFrame;
-     callStack.push_back(mainFrame);
+    struct StackFrame mainFrame;
+    callStack.push_back(mainFrame);
 
-     executeBlock(mainFunc.getBlocks().front());
-   }
+    executeBlock(mainFunc.getBlocks().front());
+  }
 
  private:
-   std::vector<StackFrame> callStack;
+  mlir::ModuleOp module;
 
-   StackFrame &currentFrame() { return callStack.back(); }
+  std::vector<StackFrame> callStack;
 
-   void executeBlock(mlir::Block &block) {
-     for (mlir::Operation &op : block) {
-       if (dispatch(&op))
-         continue;
+  StackFrame& currentFrame() { return callStack.back(); }
 
-       if (auto returnOp = llvm::dyn_cast<mlir::func::ReturnOp>(op)) {
-         if (returnOp.getNumOperands() > 0) {
-           printValue(currentFrame().state[returnOp.getOperand(0)]);
-         }
-         return;
-       }
-       throw std::runtime_error("Unsupported op: " +
-                                op.getName().getStringRef().str());
-     }
-   }
+  std::vector<RuntimeValue> executeBlock(mlir::Block& block) {
+    std::cout<<"LOG: --executeBlock--"<<std::endl;
+    for (mlir::Operation& op : block) {
+      std::cout<<"LOG: --executeBlock-- "<<op.getName().getStringRef().str()<<std::endl;
+      if (dispatch(&op)) continue;
 
-   bool dispatch(mlir::Operation *op) {
-     if (auto cOp = llvm::dyn_cast<mlir::arith::ConstantOp>(op)) {
-       evalConstant(cOp);
-       return true;
-     }
-     if (auto aOp = llvm::dyn_cast<mlir::arith::AddFOp>(op)) {
-       evalAddF(aOp);
-       return true;
-     }
-     if (auto alOp = llvm::dyn_cast<mlir::memref::AllocOp>(op)) {
-       evalAlloc(alOp);
-       return true;
-     }
-     if (auto dOp = llvm::dyn_cast<mlir::memref::DeallocOp>(op)) {
-       evalDealloc(dOp);
-       return true;
-     }
-     if (auto sOp = llvm::dyn_cast<mlir::memref::StoreOp>(op)) {
-       evalStore(sOp);
-       return true;
-     }
-     if (auto lOp = llvm::dyn_cast<mlir::memref::LoadOp>(op)) {
-       evalLoad(lOp);
-       return true;
-     }
-     if (auto forOp = llvm::dyn_cast<mlir::scf::ForOp>(op)) {
-       evalFor(forOp);
-       return true;
-     }
-     return false;
-   }
+      if (auto returnOp = llvm::dyn_cast<mlir::func::ReturnOp>(op)) {
+        auto numOperands = returnOp.getNumOperands();
+        std::vector<RuntimeValue> returnVector;
+        for (int i = 0; i < numOperands; i++) {
+          returnVector.push_back(currentFrame().state[returnOp.getOperand(i)]);
+        }
+        return returnVector;
+      }
+      throw std::runtime_error("Unsupported op: " +
+                               op.getName().getStringRef().str());
+    }
+    return {};
+  }
+
+  bool dispatch(mlir::Operation* op) {
+    if (auto cOp = llvm::dyn_cast<mlir::arith::ConstantOp>(op)) {
+      evalConstant(cOp);
+      return true;
+    }
+    if (auto aOp = llvm::dyn_cast<mlir::arith::AddFOp>(op)) {
+      evalAddF(aOp);
+      return true;
+    }
+    if (auto alOp = llvm::dyn_cast<mlir::memref::AllocOp>(op)) {
+      evalAlloc(alOp);
+      return true;
+    }
+    if (auto dOp = llvm::dyn_cast<mlir::memref::DeallocOp>(op)) {
+      evalDealloc(dOp);
+      return true;
+    }
+    if (auto sOp = llvm::dyn_cast<mlir::memref::StoreOp>(op)) {
+      evalStore(sOp);
+      return true;
+    }
+    if (auto lOp = llvm::dyn_cast<mlir::memref::LoadOp>(op)) {
+      evalLoad(lOp);
+      return true;
+    }
+    if (auto forOp = llvm::dyn_cast<mlir::scf::ForOp>(op)) {
+      evalFor(forOp);
+      return true;
+    }
+    if (auto callOp = llvm::dyn_cast<mlir::func::CallOp>(op)) {
+      evalCall(callOp);
+      return true;
+    }
+    return false;
+  }
+
+  void evalCall(mlir::func::CallOp op) {
+    std::vector<RuntimeValue> args;
+    
+    for(auto operand : op.getOperands()) {
+      args.push_back(currentFrame().state[operand]);
+    }
+
+    auto callee = module.lookupSymbol<mlir::func::FuncOp>(op.getCallee());
+    if (!callee || callee.getBlocks().empty()) {
+        throw std::runtime_error("Callee not found or empty");
+    }
+
+    callStack.push_back(StackFrame());
+    mlir::Block &entryBlock = callee.getBlocks().front();
+
+    for(int i = 0; i < args.size(); i++) {
+      currentFrame().state[entryBlock.getArgument(i)] = args[i];
+    }
+  
+    std::vector<RuntimeValue> results = executeBlock(entryBlock);
+    callStack.pop_back();
+
+    for(auto i = 0; i < results.size(); i++) {
+      currentFrame().state[op.getResult(i)] = results[i];
+    }
+}
 
   void evalConstant(mlir::arith::ConstantOp op) {
     if (auto intAttr = llvm::dyn_cast<mlir::IntegerAttr>(op.getValue())) {
       // Check if it's an 'index' type or standard int
       if (op.getType().isIndex()) {
         currentFrame().state[op.getResult()] =
-            RuntimeValue{intAttr.getInt()}; // Stores as int64_t
+            RuntimeValue{intAttr.getInt()};  // Stores as int64_t
       } else {
         currentFrame().state[op.getResult()] =
             RuntimeValue{static_cast<int32_t>(intAttr.getInt())};
