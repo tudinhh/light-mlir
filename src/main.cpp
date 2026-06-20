@@ -6,9 +6,6 @@
 #include <variant>
 #include <vector>
 
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/Support/Casting.h"
-#include "llvm/Support/SourceMgr.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -17,6 +14,11 @@
 #include "mlir/IR/DialectRegistry.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Parser/Parser.h"
+#include "mlir/Pass/PassManager.h"
+#include "mlir/Transforms/Passes.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/SourceMgr.h"
 
 // 1. MemRef Data Structure for N-dimensional Host Memory
 struct MemRef {
@@ -60,11 +62,21 @@ struct StackFrame {
   llvm::DenseMap<mlir::Value, RuntimeValue> state;
 };
 
+void optimizeModule(mlir::ModuleOp module) {
+  mlir::PassManager pm(module->getContext());
+
+  pm.addPass(mlir::createCanonicalizerPass());
+
+  if (mlir::failed(pm.run(module))) {
+    throw std::runtime_error("Compiler pipeline failed");
+  }
+}
+
 // 3. Interpreter Class
 class Interpreter {
  public:
   void run(mlir::ModuleOp runModule) {
-    std::cout<<"LOG: --run--"<<std::endl;
+    std::cout << "LOG: --run--" << std::endl;
     module = runModule;
     auto mainFunc = module.lookupSymbol<mlir::func::FuncOp>("main");
     if (!mainFunc || mainFunc.getBlocks().empty()) {
@@ -85,9 +97,10 @@ class Interpreter {
   StackFrame& currentFrame() { return callStack.back(); }
 
   std::vector<RuntimeValue> executeBlock(mlir::Block& block) {
-    std::cout<<"LOG: --executeBlock--"<<std::endl;
+    std::cout << "LOG: --executeBlock--" << std::endl;
     for (mlir::Operation& op : block) {
-      std::cout<<"LOG: --executeBlock-- "<<op.getName().getStringRef().str()<<std::endl;
+      std::cout << "LOG: --executeBlock-- " << op.getName().getStringRef().str()
+                << std::endl;
       if (dispatch(&op)) continue;
 
       if (auto returnOp = llvm::dyn_cast<mlir::func::ReturnOp>(op)) {
@@ -142,30 +155,30 @@ class Interpreter {
 
   void evalCall(mlir::func::CallOp op) {
     std::vector<RuntimeValue> args;
-    
-    for(auto operand : op.getOperands()) {
+
+    for (auto operand : op.getOperands()) {
       args.push_back(currentFrame().state[operand]);
     }
 
     auto callee = module.lookupSymbol<mlir::func::FuncOp>(op.getCallee());
     if (!callee || callee.getBlocks().empty()) {
-        throw std::runtime_error("Callee not found or empty");
+      throw std::runtime_error("Callee not found or empty");
     }
 
     callStack.push_back(StackFrame());
     mlir::Block &entryBlock = callee.getBlocks().front();
 
-    for(int i = 0; i < args.size(); i++) {
+    for (int i = 0; i < args.size(); i++) {
       currentFrame().state[entryBlock.getArgument(i)] = args[i];
     }
-  
+
     std::vector<RuntimeValue> results = executeBlock(entryBlock);
     callStack.pop_back();
 
-    for(auto i = 0; i < results.size(); i++) {
+    for (auto i = 0; i < results.size(); i++) {
       currentFrame().state[op.getResult(i)] = results[i];
     }
-}
+  }
 
   void evalConstant(mlir::arith::ConstantOp op) {
     if (auto intAttr = llvm::dyn_cast<mlir::IntegerAttr>(op.getValue())) {
@@ -275,6 +288,8 @@ int main(int argc, char** argv) {
     std::cerr << "Failed to parse MLIR file.\n";
     return 1;
   }
+
+  optimizeModule(module.get());
 
   try {
     Interpreter interpreter;

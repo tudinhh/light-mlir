@@ -25,4 +25,6 @@ target_link_libraries(light-opt
     MLIRFuncDialect
     MLIRMemRefDialect
     MLIRSCFDialect
+    MLIRPass
+    MLIRTransforms
 )
