@@ -27,4 +27,6 @@ target_link_libraries(light-opt
     MLIRSCFDialect
     MLIRPass
     MLIRTransforms
+    MLIRLinalgTransforms
+    MLIRLinalgDialect
 )

@@ -6,8 +6,10 @@
 #include <variant>
 #include <vector>
 
+#include "mlir/Conversion/LinalgToStandard/LinalgToStandard.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Linalg/Passes.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -66,6 +68,7 @@ void optimizeModule(mlir::ModuleOp module) {
   mlir::PassManager pm(module->getContext());
 
   pm.addPass(mlir::createCanonicalizerPass());
+  pm.addPass(mlir::createConvertLinalgToLoopsPass());
 
   if (mlir::failed(pm.run(module))) {
     throw std::runtime_error("Compiler pipeline failed");
@@ -98,18 +101,20 @@ class Interpreter {
 
   std::vector<RuntimeValue> executeBlock(mlir::Block& block) {
     std::cout << "LOG: --executeBlock--" << std::endl;
+    // Iterate through the ops
     for (mlir::Operation& op : block) {
       std::cout << "LOG: --executeBlock-- " << op.getName().getStringRef().str()
                 << std::endl;
+      // Evaluate supported ops
       if (dispatch(&op)) continue;
 
       if (auto returnOp = llvm::dyn_cast<mlir::func::ReturnOp>(op)) {
         auto numOperands = returnOp.getNumOperands();
-        std::vector<RuntimeValue> returnVector;
+        std::vector<RuntimeValue> results;
         for (int i = 0; i < numOperands; i++) {
-          returnVector.push_back(currentFrame().state[returnOp.getOperand(i)]);
+          results.push_back(currentFrame().state[returnOp.getOperand(i)]);
         }
-        return returnVector;
+        return results;
       }
       throw std::runtime_error("Unsupported op: " +
                                op.getName().getStringRef().str());
@@ -128,6 +133,10 @@ class Interpreter {
     }
     if (auto alOp = llvm::dyn_cast<mlir::memref::AllocOp>(op)) {
       evalAlloc(alOp);
+      return true;
+    }
+    if (auto mulFOp = llvm::dyn_cast<mlir::arith::MulFOp>(op)) {
+      evalMulF(mulFOp);
       return true;
     }
     if (auto dOp = llvm::dyn_cast<mlir::memref::DeallocOp>(op)) {
@@ -239,6 +248,12 @@ class Interpreter {
     currentFrame().state[op.getResult()] = RuntimeValue{val};
   }
 
+  void evalMulF(mlir::arith::MulFOp op) {
+    float lhs = currentFrame().state[op.getLhs()].get<float>();
+    float rhs = currentFrame().state[op.getRhs()].get<float>();
+    currentFrame().state[op.getResult()] = RuntimeValue{lhs * rhs};
+  }
+
   void evalFor(mlir::scf::ForOp op) {
     int64_t lower = currentFrame().state[op.getLowerBound()].get<int64_t>();
     int64_t upper = currentFrame().state[op.getUpperBound()].get<int64_t>();
@@ -253,8 +268,12 @@ class Interpreter {
     for (int64_t i = lower; i < upper; i += step) {
       currentFrame().state[iv] = RuntimeValue{i};
       for (mlir::Operation& bodyOp : bodyBlock->getOperations()) {
-        if (llvm::isa<mlir::scf::YieldOp>(bodyOp)) continue;
-        dispatch(&bodyOp);
+        if (llvm::isa<mlir::scf::YieldOp>(bodyOp))
+          continue;
+        if (!dispatch(&bodyOp)) {
+          throw std::runtime_error("Unsupported op inside loop: " +
+                                   bodyOp.getName().getStringRef().str());
+        }
       }
     }
   }
@@ -278,7 +297,8 @@ int main(int argc, char** argv) {
   mlir::DialectRegistry registry;
 
   registry.insert<mlir::arith::ArithDialect, mlir::func::FuncDialect,
-                  mlir::memref::MemRefDialect, mlir::scf::SCFDialect>();
+                  mlir::memref::MemRefDialect, mlir::scf::SCFDialect,
+                  mlir::linalg::LinalgDialect>();
   context.appendDialectRegistry(registry);
   context.loadAllAvailableDialects();
 
