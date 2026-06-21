@@ -6,7 +6,6 @@
 #include <variant>
 #include <vector>
 
-#include "mlir/Conversion/LinalgToStandard/LinalgToStandard.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/Passes.h"
@@ -61,6 +60,7 @@ struct RuntimeValue {
 };
 
 struct StackFrame {
+  std::string funcName;
   llvm::DenseMap<mlir::Value, RuntimeValue> state;
 };
 
@@ -87,9 +87,23 @@ class Interpreter {
     }
 
     struct StackFrame mainFrame;
+    mainFrame.funcName = "main";
     callStack.push_back(mainFrame);
 
-    executeBlock(mainFunc.getBlocks().front());
+    try {
+      executeBlock(mainFunc.getBlocks().front());
+    } catch (const std::exception &e) {
+      std::cerr << "\nFatal Execution Error: " << e.what() << "\n";
+      printStackTrace();
+      exit(1);
+    }
+  }
+
+  void printStackTrace() {
+    std::cerr << "Stack trace: \n";
+    for (auto it = callStack.rbegin(); it != callStack.rend(); it++) {
+      std::cerr << " at @" << it->funcName << "\n";
+    }
   }
 
  private:
@@ -174,7 +188,9 @@ class Interpreter {
       throw std::runtime_error("Callee not found or empty");
     }
 
-    callStack.push_back(StackFrame());
+    StackFrame calleeFrame;
+    calleeFrame.funcName = op.getCallee().str();
+    callStack.push_back(calleeFrame);
     mlir::Block &entryBlock = callee.getBlocks().front();
 
     for (int i = 0; i < args.size(); i++) {
