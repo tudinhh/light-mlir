@@ -51,7 +51,7 @@ struct MemRef {
 
 // 2. Dynamic Runtime Value
 struct RuntimeValue {
-  std::variant<int32_t, int64_t, float, std::shared_ptr<MemRef>> data;
+  std::variant<bool, int, long, float, std::shared_ptr<MemRef>> data;
 
   template <typename T>
   T get() const {
@@ -173,9 +173,41 @@ class Interpreter {
       evalCall(callOp);
       return true;
     }
+    if (auto ifOp = llvm::dyn_cast<mlir::scf::IfOp>(op)) {
+      evalIf(ifOp);
+      return true;
+    }
     return false;
   }
+  void evalIf(mlir::scf::IfOp op) {
+    // 1. Read the boolean condition from the current frame.
+    // MLIR i1 types are usually stored as bool or int8_t in C++ variants.
+    bool condition = currentFrame().state[op.getCondition()].get<bool>();
 
+    // 2. Select the correct block to execute.
+    mlir::Block *blockToExecute = nullptr;
+    if (condition) {
+      blockToExecute = op.thenBlock();
+    } else if (op.elseBlock()) {
+      blockToExecute = op.elseBlock();
+    }
+
+    // 3. Execute the block if one exists
+    if (blockToExecute) {
+      executeBlock(*blockToExecute);
+
+      // 4. Handle the return values (scf.yield)
+      // The last operation in an scf block is always a yield.
+      auto yieldOp =
+          llvm::cast<mlir::scf::YieldOp>(blockToExecute->getTerminator());
+
+      // Map the yielded values to the results of the scf.if operation
+      for (auto [yieldVal, result] :
+           llvm::zip(yieldOp.getOperands(), op.getResults())) {
+        currentFrame().state[result] = currentFrame().state[yieldVal];
+      }
+    }
+  }
   void evalCall(mlir::func::CallOp op) {
     std::vector<RuntimeValue> args;
 
