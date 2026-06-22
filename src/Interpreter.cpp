@@ -69,7 +69,6 @@ void Interpreter::registerOps() {
 }
 
 void Interpreter::run(mlir::ModuleOp runModule) {
-  std::cout << "LOG: --run--" << std::endl;
   module = runModule;
   auto mainFunc = module.lookupSymbol<mlir::func::FuncOp>("main");
   if (!mainFunc || mainFunc.getBlocks().empty()) {
@@ -80,12 +79,18 @@ void Interpreter::run(mlir::ModuleOp runModule) {
   mainFrame.funcName = "main";
   callStack.push_back(mainFrame);
 
+  std::vector<RuntimeValue> mainResults;
+
   try {
-    execute(mainFunc.getBlocks().front());
+    mainResults = execute(mainFunc.getBlocks().front());
   } catch (const std::exception &e) {
     std::cerr << "\nFatal Execution Error: " << e.what() << "\n";
     printStackTrace();
     exit(1);
+  }
+  for (RuntimeValue result : mainResults) {
+    printRuntimeValue(result);
+    std::cout << std::endl;
   }
 }
 
@@ -97,26 +102,20 @@ void Interpreter::printStackTrace() {
 }
 
 std::vector<RuntimeValue> Interpreter::execute(mlir::Block &block) {
-  std::cout << "LOG: --execute--" << std::endl;
-
   for (mlir::Operation &op : block) {
-    std::cout << "LOG: --execute-- " << op.getName().getStringRef().str()
-              << std::endl;
-    if (dispatch(&op))
-      continue;
-
-    if (auto returnOp = llvm::dyn_cast<mlir::func::ReturnOp>(op)) {
-      auto numOperands = returnOp.getNumOperands();
-      std::vector<RuntimeValue> results;
-      for (int i = 0; i < numOperands; i++) {
-        results.push_back(currentFrame().state[returnOp.getOperand(i)]);
-      }
-      return results;
-    }
-    throw std::runtime_error("Unsupported op: " +
-                             op.getName().getStringRef().str());
+    dispatch(&op);
   }
-  return {};
+
+  std::vector<RuntimeValue> results;
+  mlir::Operation *terminator = block.getTerminator();
+
+  if (auto returnOp = llvm::dyn_cast<mlir::func::ReturnOp>(terminator)) {
+    for (mlir::Value operand : returnOp.getOperands()) {
+      results.push_back(currentFrame().state[operand]);
+    }
+  }
+
+  return results;
 }
 
 bool Interpreter::dispatch(mlir::Operation *op) {
@@ -258,9 +257,6 @@ void Interpreter::evalFor(mlir::scf::ForOp op) {
   int64_t upper = currentFrame().state[op.getUpperBound()].get<int64_t>();
   int64_t step = currentFrame().state[op.getStep()].get<int64_t>();
 
-  std::cout << "Loop bound:" << lower << " " << upper << " " << step
-            << std::endl;
-
   mlir::Value iv = op.getInductionVar();
   mlir::Block *bodyBlock = op.getBody();
 
@@ -277,7 +273,7 @@ void Interpreter::evalFor(mlir::scf::ForOp op) {
   }
 }
 
-void Interpreter::printValue(const RuntimeValue &val) {
+void Interpreter::printRuntimeValue(const RuntimeValue &val) {
   if (std::holds_alternative<int32_t>(val.data)) {
     std::cout << "Interpreter Output (i32): " << val.get<int32_t>() << "\n";
   } else if (std::holds_alternative<float>(val.data)) {

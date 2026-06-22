@@ -10,10 +10,11 @@ func.func @add_num(%a: f32, %b: f32) -> f32 {
     return %sum2 : f32
 }
 
-func.func @main() {
+func.func @main() -> (f32, f32) {
     %a = arith.constant 5.0 : f32
     %b = arith.constant 2.0 : f32
     
     %sum = func.call @add_num(%a, %b) : (f32, f32) -> f32
-    return
+    %cons = arith.constant 10.0 : f32
+    return %sum, %cons : f32, f32
 }

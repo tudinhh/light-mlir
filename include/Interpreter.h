@@ -89,5 +89,5 @@ private:
   void evalLoad(mlir::memref::LoadOp op);
   void evalMulF(mlir::arith::MulFOp op);
   void evalFor(mlir::scf::ForOp op);
-  void printValue(const RuntimeValue &val);
+  void printRuntimeValue(const RuntimeValue &val);
 };
