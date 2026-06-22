@@ -2,6 +2,72 @@
 
 #include <iostream>
 
+Interpreter::Interpreter() { registerOps(); }
+
+void Interpreter::registerOps() {
+  opRegistry[mlir::arith::AddFOp::getOperationName()] =
+      [this](mlir::Operation *op) {
+        this->evalAddF(llvm::cast<mlir::arith::AddFOp>(op));
+        return true;
+      };
+
+  opRegistry[mlir::arith::MulFOp::getOperationName()] =
+      [this](mlir::Operation *op) {
+        this->evalMulF(llvm::cast<mlir::arith::MulFOp>(op));
+        return true;
+      };
+
+  opRegistry[mlir::scf::IfOp::getOperationName()] =
+      [this](mlir::Operation *op) {
+        this->evalIf(llvm::cast<mlir::scf::IfOp>(op));
+        return true;
+      };
+
+  opRegistry[mlir::arith::ConstantOp::getOperationName()] =
+      [this](mlir::Operation *op) {
+        this->evalConstant(llvm::cast<mlir::arith::ConstantOp>(op));
+        return true;
+      };
+
+  opRegistry[mlir::memref::AllocOp::getOperationName()] =
+      [this](mlir::Operation *op) {
+        this->evalAlloc(llvm::cast<mlir::memref::AllocOp>(op));
+        return true;
+      };
+
+  opRegistry[mlir::memref::DeallocOp::getOperationName()] =
+      [this](mlir::Operation *op) {
+        this->evalDealloc(llvm::cast<mlir::memref::DeallocOp>(op));
+        return true;
+      };
+
+  opRegistry[mlir::memref::StoreOp::getOperationName()] =
+      [this](mlir::Operation *op) {
+        this->evalStore(llvm::cast<mlir::memref::StoreOp>(op));
+        return true;
+      };
+
+  opRegistry[mlir::memref::LoadOp::getOperationName()] =
+      [this](mlir::Operation *op) {
+        this->evalLoad(llvm::cast<mlir::memref::LoadOp>(op));
+        return true;
+      };
+
+  opRegistry[mlir::scf::ForOp::getOperationName()] =
+      [this](mlir::Operation *op) {
+        this->evalFor(llvm::cast<mlir::scf::ForOp>(op));
+        return true;
+      };
+
+  opRegistry[mlir::func::CallOp::getOperationName()] =
+      [this](mlir::Operation *op) {
+        this->evalCall(llvm::cast<mlir::func::CallOp>(op));
+        return true;
+      };
+  opRegistry[mlir::func::ReturnOp::getOperationName()] =
+      [](mlir::Operation *op) { return true; };
+}
+
 void Interpreter::run(mlir::ModuleOp runModule) {
   std::cout << "LOG: --run--" << std::endl;
   module = runModule;
@@ -15,7 +81,7 @@ void Interpreter::run(mlir::ModuleOp runModule) {
   callStack.push_back(mainFrame);
 
   try {
-    executeBlock(mainFunc.getBlocks().front());
+    execute(mainFunc.getBlocks().front());
   } catch (const std::exception &e) {
     std::cerr << "\nFatal Execution Error: " << e.what() << "\n";
     printStackTrace();
@@ -30,13 +96,12 @@ void Interpreter::printStackTrace() {
   }
 }
 
-std::vector<RuntimeValue> Interpreter::executeBlock(mlir::Block &block) {
-  std::cout << "LOG: --executeBlock--" << std::endl;
-  // Iterate through the ops
+std::vector<RuntimeValue> Interpreter::execute(mlir::Block &block) {
+  std::cout << "LOG: --execute--" << std::endl;
+
   for (mlir::Operation &op : block) {
-    std::cout << "LOG: --executeBlock-- " << op.getName().getStringRef().str()
+    std::cout << "LOG: --execute-- " << op.getName().getStringRef().str()
               << std::endl;
-    // Evaluate supported ops
     if (dispatch(&op))
       continue;
 
@@ -55,46 +120,14 @@ std::vector<RuntimeValue> Interpreter::executeBlock(mlir::Block &block) {
 }
 
 bool Interpreter::dispatch(mlir::Operation *op) {
-  if (auto cOp = llvm::dyn_cast<mlir::arith::ConstantOp>(op)) {
-    evalConstant(cOp);
-    return true;
+  llvm::StringRef opName = op->getName().getStringRef();
+  auto it = opRegistry.find(opName);
+
+  if (it != opRegistry.end()) {
+    return it->second(op);
   }
-  if (auto aOp = llvm::dyn_cast<mlir::arith::AddFOp>(op)) {
-    evalAddF(aOp);
-    return true;
-  }
-  if (auto alOp = llvm::dyn_cast<mlir::memref::AllocOp>(op)) {
-    evalAlloc(alOp);
-    return true;
-  }
-  if (auto mulFOp = llvm::dyn_cast<mlir::arith::MulFOp>(op)) {
-    evalMulF(mulFOp);
-    return true;
-  }
-  if (auto dOp = llvm::dyn_cast<mlir::memref::DeallocOp>(op)) {
-    evalDealloc(dOp);
-    return true;
-  }
-  if (auto sOp = llvm::dyn_cast<mlir::memref::StoreOp>(op)) {
-    evalStore(sOp);
-    return true;
-  }
-  if (auto lOp = llvm::dyn_cast<mlir::memref::LoadOp>(op)) {
-    evalLoad(lOp);
-    return true;
-  }
-  if (auto forOp = llvm::dyn_cast<mlir::scf::ForOp>(op)) {
-    evalFor(forOp);
-    return true;
-  }
-  if (auto callOp = llvm::dyn_cast<mlir::func::CallOp>(op)) {
-    evalCall(callOp);
-    return true;
-  }
-  if (auto ifOp = llvm::dyn_cast<mlir::scf::IfOp>(op)) {
-    evalIf(ifOp);
-    return true;
-  }
+
+  throw std::runtime_error("Unsupported op: " + opName.str());
   return false;
 }
 
@@ -113,7 +146,7 @@ void Interpreter::evalIf(mlir::scf::IfOp op) {
 
   // 3. Execute the block if one exists
   if (blockToExecute) {
-    executeBlock(*blockToExecute);
+    execute(*blockToExecute);
 
     // 4. Handle the return values (scf.yield)
     // The last operation in an scf block is always a yield.
@@ -148,7 +181,7 @@ void Interpreter::evalCall(mlir::func::CallOp op) {
     currentFrame().state[entryBlock.getArgument(i)] = args[i];
   }
 
-  std::vector<RuntimeValue> results = executeBlock(entryBlock);
+  std::vector<RuntimeValue> results = execute(entryBlock);
   callStack.pop_back();
 
   for (auto i = 0; i < results.size(); i++) {

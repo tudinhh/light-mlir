@@ -63,15 +63,18 @@ struct StackFrame {
 
 class Interpreter {
 public:
+  Interpreter();
   void run(mlir::ModuleOp runModule);
   void printStackTrace();
 
 private:
   mlir::ModuleOp module;
   std::vector<StackFrame> callStack;
+  llvm::StringMap<std::function<bool(mlir::Operation *)>> opRegistry;
 
+  void registerOps();
   StackFrame &currentFrame() { return callStack.back(); }
-  std::vector<RuntimeValue> executeBlock(mlir::Block &block);
+  std::vector<RuntimeValue> execute(mlir::Block &block);
   bool dispatch(mlir::Operation *op);
   std::vector<int64_t>
   extractIndices(mlir::Operation::operand_range indicesOps);

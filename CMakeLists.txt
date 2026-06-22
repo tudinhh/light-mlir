@@ -13,11 +13,11 @@ message(STATUS "Using MLIRConfig.cmake from ${MLIR_DIR}")
 include_directories(${LLVM_INCLUDE_DIRS} ${MLIR_INCLUDE_DIRS})
 link_directories(${LLVM_LIBRARY_DIRS})
 
-add_executable(light-opt src/main.cpp src/Interpreter.cpp)
-target_include_directories(light-opt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+add_executable(lim src/main.cpp src/Interpreter.cpp)
+target_include_directories(lim PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # Link essential MLIR core and dialect libraries
-target_link_libraries(light-opt
+target_link_libraries(lim
     PRIVATE
     MLIRIR
     MLIRParser
