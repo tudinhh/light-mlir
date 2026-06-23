@@ -11,6 +11,11 @@ void Interpreter::registerOps() {
         return true;
       };
 
+  opRegistry[mlir::arith::AddIOp::getOperationName()] =
+      [this](mlir::Operation *op) {
+        this->evalAddI(llvm::cast<mlir::arith::AddIOp>(op));
+        return true;
+      };
   opRegistry[mlir::arith::MulFOp::getOperationName()] =
       [this](mlir::Operation *op) {
         this->evalMulF(llvm::cast<mlir::arith::MulFOp>(op));
@@ -66,6 +71,9 @@ void Interpreter::registerOps() {
       };
   opRegistry[mlir::func::ReturnOp::getOperationName()] =
       [](mlir::Operation *op) { return true; };
+  opRegistry[mlir::scf::YieldOp::getOperationName()] = [](mlir::Operation *op) {
+    return true;
+  };
 }
 
 void Interpreter::run(mlir::ModuleOp runModule, llvm::StringRef entryFuncName) {
@@ -131,11 +139,8 @@ bool Interpreter::dispatch(mlir::Operation *op) {
 }
 
 void Interpreter::evalIf(mlir::scf::IfOp op) {
-  // 1. Read the boolean condition from the current frame.
-  // MLIR i1 types are usually stored as bool or int8_t in C++ variants.
-  bool condition = currentFrame().state[op.getCondition()].get<bool>();
-
-  // 2. Select the correct block to execute.
+  int32_t conditionVal = currentFrame().state[op.getCondition()].get<int32_t>();
+  bool condition = (conditionVal != 0);
   mlir::Block *blockToExecute = nullptr;
   if (condition) {
     blockToExecute = op.thenBlock();
@@ -143,16 +148,12 @@ void Interpreter::evalIf(mlir::scf::IfOp op) {
     blockToExecute = op.elseBlock();
   }
 
-  // 3. Execute the block if one exists
   if (blockToExecute) {
     execute(*blockToExecute);
 
-    // 4. Handle the return values (scf.yield)
-    // The last operation in an scf block is always a yield.
     auto yieldOp =
         llvm::cast<mlir::scf::YieldOp>(blockToExecute->getTerminator());
 
-    // Map the yielded values to the results of the scf.if operation
     for (auto [yieldVal, result] :
          llvm::zip(yieldOp.getOperands(), op.getResults())) {
       currentFrame().state[result] = currentFrame().state[yieldVal];
@@ -192,8 +193,7 @@ void Interpreter::evalConstant(mlir::arith::ConstantOp op) {
   if (auto intAttr = llvm::dyn_cast<mlir::IntegerAttr>(op.getValue())) {
     // Check if it's an 'index' type or standard int
     if (op.getType().isIndex()) {
-      currentFrame().state[op.getResult()] =
-          RuntimeValue{intAttr.getInt()}; // Stores as int64_t
+      currentFrame().state[op.getResult()] = RuntimeValue{intAttr.getInt()};
     } else {
       currentFrame().state[op.getResult()] =
           RuntimeValue{static_cast<int32_t>(intAttr.getInt())};
@@ -207,6 +207,12 @@ void Interpreter::evalConstant(mlir::arith::ConstantOp op) {
 void Interpreter::evalAddF(mlir::arith::AddFOp op) {
   float lhs = currentFrame().state[op.getLhs()].get<float>();
   float rhs = currentFrame().state[op.getRhs()].get<float>();
+  currentFrame().state[op.getResult()] = RuntimeValue{lhs + rhs};
+}
+
+void Interpreter::evalAddI(mlir::arith::AddIOp op) {
+  float lhs = currentFrame().state[op.getLhs()].get<int>();
+  float rhs = currentFrame().state[op.getRhs()].get<int>();
   currentFrame().state[op.getResult()] = RuntimeValue{lhs + rhs};
 }
 

@@ -1,3 +1,10 @@
+// RUN: %not %lim %s 2>&1 | %FileCheck %s
+
+// CHECK: Stack trace:
+// CHECK-NEXT: at @trigger_crash
+// CHECK-NEXT: at @level_2
+// CHECK-NEXT: at @level_1
+// CHECK-NEXT: at @main
 
 func.func @trigger_crash(%arg0: f32) -> f32 {
   %crash = arith.subf %arg0, %arg0 : f32

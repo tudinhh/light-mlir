@@ -8,21 +8,8 @@
 #include "mlir/IR/DialectRegistry.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Parser/Parser.h"
-#include "mlir/Pass/PassManager.h"
-#include "mlir/Transforms/Passes.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/SourceMgr.h"
-
-void optimizeModule(mlir::ModuleOp module) {
-  mlir::PassManager pm(module->getContext());
-
-  pm.addPass(mlir::createCanonicalizerPass());
-  pm.addPass(mlir::createConvertLinalgToLoopsPass());
-
-  if (mlir::failed(pm.run(module))) {
-    throw std::runtime_error("Compiler pipeline failed");
-  }
-}
 
 int main(int argc, char** argv) {
   if (argc < 2) {
@@ -45,8 +32,6 @@ int main(int argc, char** argv) {
     std::cerr << "Failed to parse MLIR file.\n";
     return 1;
   }
-
-  optimizeModule(module.get());
 
   try {
     Interpreter interpreter;

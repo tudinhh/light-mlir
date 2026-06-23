@@ -17,8 +17,6 @@
 #include "mlir/IR/DialectRegistry.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Parser/Parser.h"
-#include "mlir/Pass/PassManager.h"
-#include "mlir/Transforms/Passes.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/SourceMgr.h"
@@ -85,6 +83,7 @@ private:
   void evalCall(mlir::func::CallOp op);
   void evalConstant(mlir::arith::ConstantOp op);
   void evalAddF(mlir::arith::AddFOp op);
+  void evalAddI(mlir::arith::AddIOp op);
   void evalAlloc(mlir::memref::AllocOp op);
   void evalDealloc(mlir::memref::DeallocOp op);
   void evalStore(mlir::memref::StoreOp op);
