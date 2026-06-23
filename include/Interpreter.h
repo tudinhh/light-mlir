@@ -23,6 +23,8 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/SourceMgr.h"
 
+#define DEFAULT_ENTRY "main"
+
 struct MemRef {
   std::vector<int64_t> shape;
   std::vector<float> data;
@@ -64,7 +66,7 @@ struct StackFrame {
 class Interpreter {
 public:
   Interpreter();
-  void run(mlir::ModuleOp runModule);
+  void run(mlir::ModuleOp runModule, llvm::StringRef entryFuncName = DEFAULT_ENTRY);
   void printStackTrace();
 
 private:

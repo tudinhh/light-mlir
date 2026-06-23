@@ -68,27 +68,27 @@ void Interpreter::registerOps() {
       [](mlir::Operation *op) { return true; };
 }
 
-void Interpreter::run(mlir::ModuleOp runModule) {
+void Interpreter::run(mlir::ModuleOp runModule, llvm::StringRef entryFuncName) {
   module = runModule;
-  auto mainFunc = module.lookupSymbol<mlir::func::FuncOp>("main");
-  if (!mainFunc || mainFunc.getBlocks().empty()) {
-    throw std::runtime_error("Error: 'main' function not found or empty.");
+  auto entryFunc = module.lookupSymbol<mlir::func::FuncOp>(entryFuncName);
+  if (!entryFunc || entryFunc.getBlocks().empty()) {
+    throw std::runtime_error("Error: Entry function not found.");
   }
 
-  struct StackFrame mainFrame;
-  mainFrame.funcName = "main";
-  callStack.push_back(mainFrame);
+  struct StackFrame entryFrame;
+  entryFrame.funcName = entryFuncName;
+  callStack.push_back(entryFrame);
 
-  std::vector<RuntimeValue> mainResults;
+  std::vector<RuntimeValue> results;
 
   try {
-    mainResults = execute(mainFunc.getBlocks().front());
+    results = execute(entryFunc.getBlocks().front());
   } catch (const std::exception &e) {
     std::cerr << "\nFatal Execution Error: " << e.what() << "\n";
     printStackTrace();
     exit(1);
   }
-  for (RuntimeValue result : mainResults) {
+  for (RuntimeValue result : results) {
     printRuntimeValue(result);
     std::cout << std::endl;
   }
@@ -269,7 +269,6 @@ void Interpreter::evalFor(mlir::scf::ForOp op) {
 
   // Step 2: Start the main C++ loop
   for (long i = lowerBound; i < upperBound; i += step) {
-
     // Step 3: Map the loop index to the block's first argument
     currentFrame().state[block->getArgument(0)] = RuntimeValue{i};
 
