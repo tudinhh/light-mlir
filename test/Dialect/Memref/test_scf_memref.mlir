@@ -1,20 +1,19 @@
+// RUN: %lim %s | %FileCheck %s
+// CHECK: 7.5
+
 func.func @main() -> f32 {
-    // 1. Allocate a 3-element float buffer
     %mem = memref.alloc() : memref<3xf32>
     
-    // 2. Loop bounds
     %lb = arith.constant 0 : index
     %ub = arith.constant 3 : index
     %step = arith.constant 1 : index
     
     %val = arith.constant 2.500000e+00 : f32
     
-    // 3. Write 2.5 to mem[%iv] for each iteration
     scf.for %iv = %lb to %ub step %step {
         memref.store %val, %mem[%iv] : memref<3xf32>
     }
     
-    // 4. Load the stored values
     %idx0 = arith.constant 0 : index
     %idx1 = arith.constant 1 : index
     %idx2 = arith.constant 2 : index
@@ -23,7 +22,6 @@ func.func @main() -> f32 {
     %r1 = memref.load %mem[%idx1] : memref<3xf32>
     %r2 = memref.load %mem[%idx2] : memref<3xf32>
     
-    // 5. Accumulate the values (2.5 + 2.5 + 2.5 = 7.5)
     %sum0 = arith.addf %r0, %r1 : f32
     %sum1 = arith.addf %sum0, %r2 : f32
     

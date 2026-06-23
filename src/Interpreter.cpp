@@ -296,9 +296,5 @@ void Interpreter::evalFor(mlir::scf::ForOp op) {
 }
 
 void Interpreter::printRuntimeValue(const RuntimeValue &val) {
-  if (std::holds_alternative<int32_t>(val.data)) {
-    std::cout << "Interpreter Output (i32): " << val.get<int32_t>() << "\n";
-  } else if (std::holds_alternative<float>(val.data)) {
-    std::cout << "Interpreter Output (f32): " << val.get<float>() << "\n";
-  }
+  std::visit([](const auto &v) { std::cout << v; }, val.data);
 }

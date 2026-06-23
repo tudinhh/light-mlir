@@ -1,3 +1,5 @@
+// RUN: %lim %s | %FileCheck %s
+
 func.func @add_one(%a1 : f32) -> f32 {
     %one = arith.constant 1.0 : f32
     %a2 = arith.addf %a1, %one : f32
@@ -17,4 +19,6 @@ func.func @main() -> (f32, f32) {
     %sum = func.call @add_num(%a, %b) : (f32, f32) -> f32
     %cons = arith.constant 10.0 : f32
     return %sum, %cons : f32, f32
+    // CHECK: 8
+    // CHECK: 10
 }
