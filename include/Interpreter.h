@@ -11,16 +11,15 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
-#include "mlir/Dialect/Linalg/Passes.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
-#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/SourceMgr.h"
+
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/DialectRegistry.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Parser/Parser.h"
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/Support/Casting.h"
-#include "llvm/Support/SourceMgr.h"
 
 #define DEFAULT_ENTRY "main"
 
@@ -52,7 +51,7 @@ struct MemRef {
 };
 
 struct RuntimeValue {
-  std::variant<bool, int, long, float, std::shared_ptr<MemRef>> data;
+  std::variant<bool, int64_t, int32_t, float, std::shared_ptr<MemRef>> data;
 
   template <typename T> T get() const { return std::get<T>(data); }
 };
@@ -70,30 +69,40 @@ public:
   void runAll(mlir::ModuleOp runModule);
   void printStackTrace();
 
+  template <typename OpT>
+  void registerOp(std::function<void(Interpreter &, OpT)> handler) {
+    opRegistry[OpT::getOperationName()] = [this, handler](mlir::Operation *op) {
+      handler(*this, llvm::cast<OpT>(op));
+      return true;
+    };
+  }
+
+  void setValue(mlir::Value key, RuntimeValue val) {
+    currentFrame().state[key] = val;
+  }
+  RuntimeValue getValue(mlir::Value key) { return currentFrame().state[key]; }
+
+  std::vector<RuntimeValue> executeBlock(mlir::Block &block) {
+    return execute(block);
+  }
+  void pushFrame(const StackFrame &frame) { callStack.push_back(frame); }
+  void popFrame() { callStack.pop_back(); }
+  mlir::ModuleOp getModule() { return module; }
+  void eraseValue(mlir::Value key) { currentFrame().state.erase(key); }
+  std::vector<int64_t>
+  extractIndices(mlir::Operation::operand_range indicesOps);
+  bool dispatch(mlir::Operation *op);
+
 private:
   mlir::ModuleOp module;
   std::vector<StackFrame> callStack;
-  llvm::StringMap<std::function<bool(mlir::Operation *)>> opRegistry;
+  llvm::StringMap<std::function<bool(Interpreter &, mlir::Operation *)>>
+      opRegistry;
 
   void runFunction(mlir::func::FuncOp fn);
   void registerOps();
   StackFrame &currentFrame() { return callStack.back(); }
   std::vector<RuntimeValue> execute(mlir::Block &block);
-  bool dispatch(mlir::Operation *op);
-  std::vector<int64_t>
-  extractIndices(mlir::Operation::operand_range indicesOps);
 
-  void evalIf(mlir::scf::IfOp op);
-  void evalCall(mlir::func::CallOp op);
-  void evalConstant(mlir::arith::ConstantOp op);
-  void evalAddF(mlir::arith::AddFOp op);
-  void evalAddI(mlir::arith::AddIOp op);
-  void evalAlloc(mlir::memref::AllocOp op);
-  void evalDealloc(mlir::memref::DeallocOp op);
-  void evalStore(mlir::memref::StoreOp op);
-  void evalLoad(mlir::memref::LoadOp op);
-  void evalMulF(mlir::arith::MulFOp op);
-  void evalFor(mlir::scf::ForOp op);
-  void evalMatmul(mlir::linalg::MatmulOp op);
   void printRuntimeValue(const RuntimeValue &val);
 };

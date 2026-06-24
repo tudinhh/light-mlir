@@ -1,52 +1,56 @@
-#include "eval.h"
+#include "OpRegistry.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 
-void Interpreter::evalFor(mlir::scf::ForOp op) {
-  // Step 1: Store the initial iter_args in a local C++ vector
+REGISTER_OP(ForOp, mlir::scf::ForOp) {
   std::vector<RuntimeValue> localIterArgs;
   for (mlir::Value initArg : op.getInitArgs()) {
-    localIterArgs.push_back(currentFrame().state[initArg]);
+    localIterArgs.push_back(interp.getValue(initArg));
   }
 
-  // Retrieve the evaluated bounds (assuming MLIR index types are stored as
-  // 'long')
-  long lowerBound = currentFrame().state[op.getLowerBound()].get<long>();
-  long upperBound = currentFrame().state[op.getUpperBound()].get<long>();
-  long step = currentFrame().state[op.getStep()].get<long>();
+  int64_t lowerBound = interp.getValue(op.getLowerBound()).get<int64_t>();
+  int64_t upperBound = interp.getValue(op.getUpperBound()).get<int64_t>();
+  int64_t step = interp.getValue(op.getStep()).get<int64_t>();
 
   mlir::Block *block = op.getBody();
+  for (int64_t i = lowerBound; i < upperBound; i += step) {
+    interp.setValue(block->getArgument(0), RuntimeValue{i});
 
-  // Step 2: Start the main C++ loop
-  for (long i = lowerBound; i < upperBound; i += step) {
-    // Step 3: Map the loop index to the block's first argument
-    currentFrame().state[block->getArgument(0)] = RuntimeValue{i};
-
-    // Step 4: Map your local iter_args to the remaining block arguments
     for (size_t j = 0; j < localIterArgs.size(); ++j) {
-      currentFrame().state[block->getArgument(j + 1)] = localIterArgs[j];
+      interp.setValue(block->getArgument(j + 1), localIterArgs[j]);
     }
 
-    // Step 5: Execute the block's operations (excluding the terminator)
     for (mlir::Operation &nestedOp : block->without_terminator()) {
-      dispatch(&nestedOp);
+      interp.dispatch(&nestedOp);
     }
 
-    // Step 6 & 7: Extract yielded values and overwrite local iter_args
     auto yieldOp = llvm::cast<mlir::scf::YieldOp>(block->getTerminator());
     for (size_t j = 0; j < yieldOp.getOperands().size(); ++j) {
-      localIterArgs[j] = currentFrame().state[yieldOp.getOperand(j)];
+      localIterArgs[j] = interp.getValue(yieldOp.getOperand(j));
     }
   }
 
-  // Step 8: Assign the final iter_args vector to the operation's results
   for (size_t j = 0; j < op.getNumResults(); ++j) {
-    currentFrame().state[op.getResult(j)] = localIterArgs[j];
+    interp.setValue(op.getResult(j), localIterArgs[j]);
   }
 }
 
-void Interpreter::evalIf(mlir::scf::IfOp op) {
-  int32_t conditionVal = currentFrame().state[op.getCondition()].get<int32_t>();
-  bool condition = (conditionVal != 0);
+REGISTER_OP(IfOp, mlir::scf::IfOp) {
+  RuntimeValue condVal = interp.getValue(op.getCondition());
+  bool condition = false;
+
+  if (std::holds_alternative<bool>(condVal.data)) {
+    condition = condVal.get<bool>();
+  } else if (std::holds_alternative<int32_t>(condVal.data)) {
+    condition = (condVal.get<int32_t>() != 0);
+  } else if (std::holds_alternative<int64_t>(condVal.data)) {
+    condition = (condVal.get<int64_t>() != 0);
+  } else {
+    throw std::runtime_error(
+        "IfOp condition is not a valid boolean or integer type");
+  }
+
   mlir::Block *blockToExecute = nullptr;
+
   if (condition) {
     blockToExecute = op.thenBlock();
   } else if (op.elseBlock()) {
@@ -54,14 +58,16 @@ void Interpreter::evalIf(mlir::scf::IfOp op) {
   }
 
   if (blockToExecute) {
-    execute(*blockToExecute);
+    interp.executeBlock(*blockToExecute);
 
     auto yieldOp =
         llvm::cast<mlir::scf::YieldOp>(blockToExecute->getTerminator());
 
     for (auto [yieldVal, result] :
          llvm::zip(yieldOp.getOperands(), op.getResults())) {
-      currentFrame().state[result] = currentFrame().state[yieldVal];
+      interp.setValue(result, interp.getValue(yieldVal));
     }
   }
 }
+
+REGISTER_OP(ScfYieldOp, mlir::scf::YieldOp) {}

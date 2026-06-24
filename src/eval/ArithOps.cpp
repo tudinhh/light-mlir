@@ -1,34 +1,51 @@
-#include "eval.h"
+#include "OpRegistry.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 
-void Interpreter::evalConstant(mlir::arith::ConstantOp op) {
+REGISTER_OP(AddIOp, mlir::arith::AddIOp) {
+  RuntimeValue lhsVal = interp.getValue(op.getLhs());
+  RuntimeValue rhsVal = interp.getValue(op.getRhs());
+
+  std::visit(
+      [&](auto &&lhs, auto &&rhs) {
+        using LType = std::decay_t<decltype(lhs)>;
+        using RType = std::decay_t<decltype(rhs)>;
+
+        if constexpr (std::is_same_v<LType, RType> &&
+                      std::is_integral_v<LType> &&
+                      !std::is_same_v<LType, bool>) {
+          interp.setValue(op.getResult(), RuntimeValue{lhs + rhs});
+        } else {
+          throw std::runtime_error("Type mismatch or non-integer in AddIOp");
+        }
+      },
+      lhsVal.data, rhsVal.data);
+}
+
+REGISTER_OP(AddFOp, mlir::arith::AddFOp) {
+  auto lhs = interp.getValue(op.getLhs()).get<float>();
+  auto rhs = interp.getValue(op.getRhs()).get<float>();
+  interp.setValue(op.getResult(), RuntimeValue{lhs + rhs});
+}
+
+REGISTER_OP(ConstantOp, mlir::arith::ConstantOp) {
   if (auto intAttr = llvm::dyn_cast<mlir::IntegerAttr>(op.getValue())) {
-    // Check if it's an 'index' type or standard int
     if (op.getType().isIndex()) {
-      currentFrame().state[op.getResult()] = RuntimeValue{intAttr.getInt()};
+      // Must explicitly cast to int64_t
+      interp.setValue(op.getResult(),
+                      RuntimeValue{static_cast<int64_t>(intAttr.getInt())});
     } else {
-      currentFrame().state[op.getResult()] =
-          RuntimeValue{static_cast<int32_t>(intAttr.getInt())};
+      interp.setValue(op.getResult(),
+                      RuntimeValue{static_cast<int32_t>(intAttr.getInt())});
     }
   } else if (auto floatAttr = llvm::dyn_cast<mlir::FloatAttr>(op.getValue())) {
-    currentFrame().state[op.getResult()] =
-        RuntimeValue{static_cast<float>(floatAttr.getValue().convertToFloat())};
+    interp.setValue(op.getResult(),
+                    RuntimeValue{static_cast<float>(
+                        floatAttr.getValue().convertToFloat())});
   }
 }
 
-void Interpreter::evalAddF(mlir::arith::AddFOp op) {
-  float lhs = currentFrame().state[op.getLhs()].get<float>();
-  float rhs = currentFrame().state[op.getRhs()].get<float>();
-  currentFrame().state[op.getResult()] = RuntimeValue{lhs + rhs};
-}
-
-void Interpreter::evalAddI(mlir::arith::AddIOp op) {
-  float lhs = currentFrame().state[op.getLhs()].get<int>();
-  float rhs = currentFrame().state[op.getRhs()].get<int>();
-  currentFrame().state[op.getResult()] = RuntimeValue{lhs + rhs};
-}
-
-void Interpreter::evalMulF(mlir::arith::MulFOp op) {
-  float lhs = currentFrame().state[op.getLhs()].get<float>();
-  float rhs = currentFrame().state[op.getRhs()].get<float>();
-  currentFrame().state[op.getResult()] = RuntimeValue{lhs * rhs};
+REGISTER_OP(MulFOp, mlir::arith::MulFOp) {
+  float lhs = interp.getValue(op.getLhs()).get<float>();
+  float rhs = interp.getValue(op.getRhs()).get<float>();
+  interp.setValue(op.getResult(), RuntimeValue{lhs * rhs});
 }
