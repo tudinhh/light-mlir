@@ -16,7 +16,12 @@ link_directories(${LLVM_LIBRARY_DIRS})
 
 add_subdirectory(test)
 
-add_executable(lim src/main.cpp src/Interpreter.cpp)
+add_executable(lim src/main.cpp src/Interpreter.cpp 
+    src/eval/ArithOps.cpp
+    src/eval/FuncOps.cpp
+    src/eval/LinalgOps.cpp
+    src/eval/MemRefOps.cpp
+    src/eval/ScfOps.cpp)
 target_include_directories(lim PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # Link essential MLIR core and dialect libraries
