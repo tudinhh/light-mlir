@@ -1,4 +1,4 @@
-// RUN: %not %lim %s 2>&1 | %FileCheck %s
+// RUN: %not %lim --entry=main %s 2>&1 | %FileCheck %s
 
 // CHECK: Stack trace:
 // CHECK-NEXT: at @trigger_crash

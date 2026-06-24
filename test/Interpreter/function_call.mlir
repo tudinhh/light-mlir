@@ -1,4 +1,4 @@
-// RUN: %lim %s | %FileCheck %s
+// RUN: %lim --entry=main %s | %FileCheck %s
 
 func.func @add_one(%a1 : f32) -> f32 {
     %one = arith.constant 1.0 : f32

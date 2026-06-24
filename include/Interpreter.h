@@ -65,7 +65,9 @@ struct StackFrame {
 class Interpreter {
 public:
   Interpreter();
-  void run(mlir::ModuleOp runModule, llvm::StringRef entryFuncName = DEFAULT_ENTRY);
+  void runFromEntry(mlir::ModuleOp runModule,
+                    llvm::StringRef entryFuncName = DEFAULT_ENTRY);
+  void runAll(mlir::ModuleOp runModule);
   void printStackTrace();
 
 private:
@@ -73,6 +75,7 @@ private:
   std::vector<StackFrame> callStack;
   llvm::StringMap<std::function<bool(mlir::Operation *)>> opRegistry;
 
+  void runFunction(mlir::func::FuncOp fn);
   void registerOps();
   StackFrame &currentFrame() { return callStack.back(); }
   std::vector<RuntimeValue> execute(mlir::Block &block);

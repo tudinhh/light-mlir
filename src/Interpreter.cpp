@@ -82,21 +82,38 @@ void Interpreter::registerOps() {
   };
 }
 
-void Interpreter::run(mlir::ModuleOp runModule, llvm::StringRef entryFuncName) {
+void Interpreter::runFromEntry(mlir::ModuleOp runModule,
+                               llvm::StringRef entryFuncName) {
   module = runModule;
   auto entryFunc = module.lookupSymbol<mlir::func::FuncOp>(entryFuncName);
   if (!entryFunc || entryFunc.getBlocks().empty()) {
-    throw std::runtime_error("Error: Entry function not found.");
+    throw std::runtime_error("Entry function not found.");
   }
 
-  struct StackFrame entryFrame;
-  entryFrame.funcName = entryFuncName;
-  callStack.push_back(entryFrame);
+  runFunction(entryFunc);
+}
+
+void Interpreter::runAll(mlir::ModuleOp runModule) {
+  module = runModule;
+  for (mlir::Operation &op : module.getBody()->getOperations()) {
+    if (auto fn = llvm::dyn_cast<mlir::func::FuncOp>(op)) {
+      if (fn.getBlocks().empty())
+        continue;
+      std::cout << "-- " << fn.getName().str() << " --\n";
+      runFunction(fn);
+    }
+  }
+}
+
+void Interpreter::runFunction(mlir::func::FuncOp fn) {
+  struct StackFrame frame;
+  frame.funcName = fn.getName();
+  callStack.push_back(frame);
 
   std::vector<RuntimeValue> results;
 
   try {
-    results = execute(entryFunc.getBlocks().front());
+    results = execute(fn.getBlocks().front());
   } catch (const std::exception &e) {
     std::cerr << "\nFatal Execution Error: " << e.what() << "\n";
     printStackTrace();
@@ -180,6 +197,7 @@ void Interpreter::evalCall(mlir::func::CallOp op) {
 
   StackFrame calleeFrame;
   calleeFrame.funcName = op.getCallee().str();
+  std::cout << "-- " + calleeFrame.funcName + " --\n";
   callStack.push_back(calleeFrame);
   mlir::Block &entryBlock = callee.getBlocks().front();
 
