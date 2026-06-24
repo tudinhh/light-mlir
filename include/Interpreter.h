@@ -10,6 +10,7 @@
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Linalg/Passes.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -90,5 +91,6 @@ private:
   void evalLoad(mlir::memref::LoadOp op);
   void evalMulF(mlir::arith::MulFOp op);
   void evalFor(mlir::scf::ForOp op);
+  void evalMatmul(mlir::linalg::MatmulOp op);
   void printRuntimeValue(const RuntimeValue &val);
 };
